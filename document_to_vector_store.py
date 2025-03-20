@@ -1,6 +1,7 @@
 import os
 import shutil
 import argparse
+import time
 
 from langchain_community.document_loaders import PyPDFDirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -19,6 +20,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--reset", action="store_true", help="Reset database")
     parser.add_argument("--check", action="store_true", help="Check PDFs in database and their chunk counts")
+    parser.add_argument("--load", action="store_true", help="Load PDFs into database")
     args = parser.parse_args()
 
     if args.check:
@@ -26,21 +28,30 @@ def main():
         return
 
     # Clear Data if reset flag is set
-    if args.reset:
+    elif args.reset:
         print("Resetting database")
         clear_database()
+        return
 
-    # create - update data store
-    documents = load_documents()
-    chunks = split_documents(documents)
-    add_chroma(chunks)
+    elif args.load:
+        # create - update data store
+        documents = load_documents()
+        chunks = split_documents(documents)
+        add_chroma(chunks)
 
-def load_documents():
+    else:
+        print("Type: 'python ./document_to_vector_store.py -h' for help")
+
+def load_documents() -> list[Document]:
     '''load all PDF documents from data directory
     - Output: list[Document] containing PDF contents'''
     # automatically laods all pdf from dir
+    print("-" * 80)
+    print("Reading documents...")
     document_loader = PyPDFDirectoryLoader(DATA_PATH)
-    return document_loader.load()
+    document = document_loader.load()
+    print("Successfully read documents")
+    return document
 
 def split_documents(documents: list[Document]):
     '''splits large documents into smaller, chunks for better processing
@@ -68,7 +79,7 @@ def add_chroma(chunks: list[Document]):
     # get existing document ids from db
     existing_items = db.get(include=[])
     existing_ids = set(existing_items["ids"])
-    print(f"Number of existing chunks in DB: {len(existing_ids)}")
+    print(f"\nNumber of existing chunks in DB: {len(existing_ids)}")
 
     # only add into db if it doenst exust
     new_chunks = []
@@ -78,12 +89,48 @@ def add_chroma(chunks: list[Document]):
 
     # add new chunks if any were found
     if new_chunks:
-        print(f"Adding {len(new_chunks)} new chunks")
-        new_chunks_ids = [chunk.metadata["id"] for chunk in new_chunks]
-        db.add_documents(new_chunks, ids=new_chunks_ids)
+        total_chunks = len(new_chunks)
+        print(f"I'm Loading...adding {total_chunks} new chunks")
+
+        # process chunks in batches
+        batch_size = 100
+        total_batches = (total_chunks - 1)//batch_size + 1
+
+        first_batch = new_chunks[:batch_size]
+        first_batch_ids = [chunk.metadata["id"] for chunk in first_batch]
+
+        print("-" * 80)
+        print(f"Processing first batch (1/{total_batches}) with {len(first_batch)} chunks...")
+        start_time = time.time()
+        db.add_documents(first_batch, ids=first_batch_ids)
+
+        first_batch_time = time.time() - start_time
+        time_per_chunk = first_batch_time / len(first_batch)
+        est_total_time = time_per_chunk * total_chunks
+
+        print(f"--- TIME ESTIMATE ---")
+        print(f"First batch processed in: {first_batch_time:.2f} seconds")
+        print(f"Average time per chunk: {time_per_chunk:.4f} seconds")
+        print(f"Estimated total time for all {total_chunks} chunks: {format_time(est_total_time)}")
+        print(f"Estimated completion time: {time.strftime('%H:%M:%S', time.localtime(time.time() + est_total_time))}")
+        print("--------------------\n")
+
+
+        for i in range(0, len(new_chunks), batch_size):
+            batch = new_chunks[i:i + batch_size]
+            batch_ids = [chunk.metadata["id"] for chunk in batch]
+
+            current_batch = i // batch_size + 1
+            print(f"Adding batch {current_batch + 1}/{total_batches} ({len(batch)} chunks)")
+
+            db.add_documents(batch, ids=batch_ids)
+
+        print("Done!")
+        print("-" * 80)
 
     else:
         print(f"No new chunks found")
+        print("-" * 80)
 
 def calculate_chunk_ids(chunks):
     '''Tag each chunk with unique string ID based on source path, page number, chunk index:
@@ -145,15 +192,26 @@ def check_database():
 
     print("-" * 80)
     print(f"Total chunks in database: {len(results['ids'])}")
-    print("\nPDF files in database:")
-    print("-" * 80)
-    print(f"{'File':<60} | {'Chunks':<10} | {'Pages':<10}")
+    print(f"{'File':<60} | {'Chunks':<10} |")
     print("-" * 80)
 
-    for pdf_path, count in sorted(pdf_pages.items()):
-        unique_pages = sum(1 for key in pdf_pages.keys() if key.startswith(f"{pdf_path}"))
-        pdf_name = os.path.basename(pdf_path)
-        print(f"{pdf_name:<60} | {count:<10} | {unique_pages:<10}")
+    for pdf_name, count in sorted(pdf_counts.items()):
+        print(f"{pdf_name[:60]:<60} | {count:<10} |")
+    print("-" * 80)
+
+def format_time(seconds):
+    """Format seconds into time string"""
+    if seconds < 60:
+        return f"{seconds:.1f} seconds"
+    elif seconds < 3600:
+        minutes = seconds // 60
+        sec = seconds % 60
+        return f"{int(minutes)} minutes {int(sec)} seconds"
+    else:
+        hours = seconds // 3600
+        minutes = (seconds % 3600) // 60
+        sec = seconds % 60
+        return f"{int(hours)} hours {int(minutes)} minutes {int(sec)} seconds"
 
 if __name__ == '__main__':
     main()
