@@ -4,13 +4,13 @@ import argparse
 
 from langchain_community.document_loaders import PyPDFDirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_ollama import OllamaEmbeddings
 from langchain_chroma import Chroma
 from langchain.schema.document import Document
+from collections import Counter
 
-
-CHROMA_PATH = "chroma" #Directory  where db be stored
-DATA_PATH = "data" # Directory containging PDF filfes
+# helper functions
+from embeddings import get_embeddings
+from config import CHROMA_PATH, DATA_PATH
 
 def main():
     '''organizes RAG Process'''
@@ -18,7 +18,12 @@ def main():
     # Check if db needs to be cleared
     parser = argparse.ArgumentParser()
     parser.add_argument("--reset", action="store_true", help="Reset database")
+    parser.add_argument("--check", action="store_true", help="Check PDFs in database and their chunk counts")
     args = parser.parse_args()
+
+    if args.check:
+        check_database()
+        return
 
     # Clear Data if reset flag is set
     if args.reset:
@@ -49,13 +54,6 @@ def split_documents(documents: list[Document]):
         is_separator_regex=False
     )
     return splitter.split_documents(documents)
-
-def get_embeddings():
-    '''initialize embeddings model for vector encoding
-    - Output: OllamaEmbeddings object'''
-    embeddings = OllamaEmbeddings(model="deepseek-r1", # model we use
-                                  base_url="http://localhost:11434")
-    return embeddings
 
 def add_chroma(chunks: list[Document]):
     '''add document chunks to chroma & avoid duplicate
@@ -93,7 +91,6 @@ def calculate_chunk_ids(chunks):
         - Output: list[Document] - same chunks with added ID in metadata
             example: "data/blablabla.pdf:8:3" '''
 
-
     last_page_id = None
     current_chunk_index = 0
 
@@ -119,7 +116,44 @@ def clear_database():
     '''Delete entire Chroma Database dir. if exists'''
     if os.path.exists(CHROMA_PATH):
         shutil.rmtree(CHROMA_PATH)
+        print(f"Database at {CHROMA_PATH} successfully deleted")
+    else:
+        print(f"No database found at {CHROMA_PATH}")
 
+def check_database():
+    '''Check PDFs in database and display their chunk counts'''
+    if not os.path.exists(CHROMA_PATH):
+        print("Databoes does not exist. Nothing to check.")
+        return
+
+    db = Chroma(persist_directory=CHROMA_PATH, embedding_function=get_embeddings())
+
+    results = db.get(include=["metadatas"])
+    if not results["ids"]:
+        print("Database is empty. No chunks found")
+        return
+
+    pdf_counts = Counter()
+    pdf_pages = Counter()
+
+    for metadata in results["metadatas"]:
+        source = metadata.get("source", "unknown")
+        pdf_counts[source] += 1
+
+        page = metadata.get("page", "unknown")
+        pdf_pages[f"{source}_{page}"] += 1
+
+    print("-" * 80)
+    print(f"Total chunks in database: {len(results['ids'])}")
+    print("\nPDF files in database:")
+    print("-" * 80)
+    print(f"{'File':<60} | {'Chunks':<10} | {'Pages':<10}")
+    print("-" * 80)
+
+    for pdf_path, count in sorted(pdf_pages.items()):
+        unique_pages = sum(1 for key in pdf_pages.keys() if key.startswith(f"{pdf_path}"))
+        pdf_name = os.path.basename(pdf_path)
+        print(f"{pdf_name:<60} | {count:<10} | {unique_pages:<10}")
 
 if __name__ == '__main__':
     main()
