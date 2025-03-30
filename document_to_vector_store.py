@@ -9,9 +9,10 @@ from langchain_chroma import Chroma
 from langchain.schema.document import Document
 from collections import Counter
 
-# helper functions
+# self-written
 from embeddings import get_embeddings
 from config import CHROMA_PATH, DATA_PATH
+from helpers import format_time
 
 def main():
     '''organizes RAG Process'''
@@ -198,20 +199,6 @@ def check_database():
     for pdf_name, count in sorted(pdf_counts.items()):
         print(f"{pdf_name[:60]:<60} | {count:<10} |")
     print("-" * 80)
-
-def format_time(seconds):
-    """Format seconds into time string"""
-    if seconds < 60:
-        return f"{seconds:.1f} seconds"
-    elif seconds < 3600:
-        minutes = seconds // 60
-        sec = seconds % 60
-        return f"{int(minutes)} minutes {int(sec)} seconds"
-    else:
-        hours = seconds // 3600
-        minutes = (seconds % 3600) // 60
-        sec = seconds % 60
-        return f"{int(hours)} hours {int(minutes)} minutes {int(sec)} seconds"
 
 if __name__ == '__main__':
     main()
