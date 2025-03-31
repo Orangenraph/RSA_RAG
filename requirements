@@ -1,0 +1,13 @@
+argparse
+langchain-community
+langchain-chroma
+langchain_ollama
+langchain-text-splitters
+langchain-schema
+datetime
+json
+re
+os
+shutil
+time
+collections
